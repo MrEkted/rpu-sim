@@ -384,7 +384,6 @@ void RPU_SetDisableFlippers(boolean disableFlippers, byte) {
 boolean RPU_GetDisableFlippers(byte) { return FlippersDisabled; }
 void RPU_SetContinuousSolenoidBit(boolean, byte) {}
 void RPU_SetContinuousSolenoid(boolean solOn, byte solNum) { Log("SOL %s %s (continuous)", NameOf("SOL_", solNum).c_str(), solOn ? "on" : "off"); }
-void RPU_CycleAllDisplays(unsigned long, byte) {}
 // Williams sound boards (games without a WAV Trigger): the sound number is logged, nothing plays
 void RPU_SetSoundValueLimits(unsigned short, unsigned short) {}
 void RPU_PushToSoundStack(unsigned short soundNumber, byte) { Log("SND %d", soundNumber); }
@@ -434,7 +433,50 @@ void RPU_SetDisplayFlash(int displayNumber, unsigned long value, unsigned long c
   }
 }
 void RPU_SetDisplayFlashCredits(unsigned long, int) {}
-void RPU_CycleAllDisplays(unsigned long, byte, byte) {}
+// Test pattern used by the real diagnostics/attract code: fills every display with one digit
+// (or, when digitNum != 0, lights a single digit position across the displays).
+// digitValue 0xFF means "count up with time", one digit per 250 ms.
+void RPU_CycleAllDisplays(unsigned long curTime, byte digitNum, byte digitValue) {
+  int displayDigit = (digitValue != 0xFF) ? (digitValue % 10) : (int)((curTime / 250) % 10);
+#if (RPU_OS_NUM_DIGITS == 7)
+  unsigned long value = displayDigit * 1111111UL;
+#else
+  unsigned long value = displayDigit * 111111UL;
+#endif
+
+  byte displayNumToShow = 0;
+  byte displayBlank = RPU_OS_ALL_DIGITS_MASK;
+  if (digitNum != 0) {
+#if (RPU_OS_NUM_DIGITS == 7)
+    displayNumToShow = (digitNum - 1) / 7;
+    displayBlank = 0x01 << ((digitNum - 1) % 7);
+#ifdef RPU_OS_USE_6_DIGIT_CREDIT_DISPLAY_WITH_7_DIGIT_DISPLAYS
+    if (displayNumToShow == 4) displayBlank = 0x01 << ((digitNum - 1) % 6);
+#endif
+#else
+    displayNumToShow = (digitNum - 1) / 6;
+    displayBlank = 0x01 << ((digitNum - 1) % 6);
+#endif
+  }
+
+  // displays 0-3 on 4-player machines; 0-1 plus the credit/BIP display (4) otherwise
+#if (RPU_NUMBER_OF_PLAYER_DISPLAYS == 4)
+  const int shown[] = {0, 1, 2, 3, 4};
+  const int shownTarget[] = {0, 1, 2, 3, 4};
+#else
+  const int shown[] = {0, 1, 4};
+  const int shownTarget[] = {0, 1, 2};   // the real code compares the credit display against index 2
+#endif
+  const int n = sizeof(shown) / sizeof(shown[0]);
+  for (int i = 0; i < n; i++) {
+    if (digitNum) {
+      RPU_SetDisplay(shown[i], value);
+      RPU_SetDisplayBlank(shown[i], (shownTarget[i] == displayNumToShow) ? displayBlank : 0);
+    } else {
+      RPU_SetDisplay(shown[i], value, false);
+    }
+  }
+}
 
 static std::string DisplayText(int d) {
   std::string s;
